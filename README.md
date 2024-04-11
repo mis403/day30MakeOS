@@ -1,2 +1,3 @@
 # day30MakeOS
 ....
+day 1 start project
