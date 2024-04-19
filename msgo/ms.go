@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"sync"
 )
 
 // 定义一个常量表示任意请求方法
@@ -76,6 +77,7 @@ type Engine struct {
 	*router
 	funcMap    template.FuncMap
 	HTMLRender render.HTMLRender
+	pool       sync.Pool
 }
 
 func (e *Engine) SetFuncMap(funcMap template.FuncMap) {
@@ -96,9 +98,11 @@ func (e *Engine) SetHtmlTemplate(template *template.Template) {
 
 // ServeHTTP 方法用于处理 HTTP 请求
 func (e *Engine) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-
-	e.httpRequestHandler(writer, request)
-
+	ctx := e.pool.Get().(*Context)
+	ctx.W = writer
+	ctx.R = request
+	e.httpRequestHandler(ctx, writer, request)
+	e.pool.Put(ctx)
 }
 
 // handle 方法用于向路由组中添加处理函数，并处理重复添加的情况
@@ -157,9 +161,19 @@ func (r *routerGroup) Head(name string, handlerFunc HandlerFunc, middlewareFunc 
 
 // NewEngine 函数用于创建一个新的 Engine 实例
 func NewEngine() *Engine {
-	return &Engine{
+	engine := &Engine{
 		router: &router{},
 	}
+	engine.pool.New = func() any {
+		return engine.allocateContext()
+	}
+	return engine
+}
+
+// Run 方法用于运行 HTTP 服务器并监听端口
+func (e *Engine) allocateContext() any {
+
+	return &Context{engine: e}
 }
 
 // Run 方法用于运行 HTTP 服务器并监听端口
@@ -173,21 +187,17 @@ func (e *Engine) Run() {
 	}
 }
 
-func (e *Engine) httpRequestHandler(writer http.ResponseWriter, request *http.Request) {
+func (e *Engine) httpRequestHandler(ctx *Context, writer http.ResponseWriter, request *http.Request) {
 	// 获取请求的方法
 	method := request.Method
 
 	// 遍历路由器中的所有路由组  k 为index v为 router
 	for _, g := range e.router.groups {
-
-		routerName := SubStringLast(request.RequestURI, "/"+g.groupName)
+		//request.RequestURI 如果路径上有参数识别不了 换成
+		routerName := SubStringLast(request.URL.Path, "/"+g.groupName)
 		node := g.treeNode.Get(routerName)
 		if node != nil && node.isEnd {
-			ctx := &Context{
-				W:      writer,
-				R:      request,
-				engine: e,
-			}
+
 			// 尝试获取对应请求方法的处理函数
 			handle, ok := g.handleFuncMap[node.routerName][ANY]
 			// 如果找到了 ANY 方法的处理函数，则直接调用
