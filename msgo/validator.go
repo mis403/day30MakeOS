@@ -47,7 +47,7 @@ func (d *defaultValidator) ValidateStruct(obj any) error {
 
 func (d *defaultValidator) Engine() any {
 	d.lazyInit()
-	return d
+	return d.validate
 }
 func (d *defaultValidator) validateStruct(obj any) error {
 	d.lazyInit()
